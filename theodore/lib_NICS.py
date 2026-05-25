@@ -408,3 +408,66 @@ class NICS_parser_TM(NICS_parser):
             print(" *** Printing NICS and eigenvalues ***")
             for ipoint, point in enumerate(self.NICS_data):
                 print("P%i ->"%ipoint, point)
+
+class NICS_parser_dalton(NICS_parser):
+    """
+    Parse Dalton NICS calculations.
+    """
+    def read(self, logfile, lvprt=1):
+        self.NICS_data = []
+        Bqind = 0
+
+        with open(logfile, 'r') as f:
+            lines = f.readlines()
+
+        for i, line in enumerate(lines):
+            if 'Charge=0.0' in line and 'Atoms=' in line and 'Basis=' in line:
+                n_bq = 0
+                for part in line.split():
+                    if part.startswith('Atoms='):
+                        n_bq = int(part.split('=')[1])
+                for j in range(n_bq):
+                    parts = lines[i + 1 + j].split()
+                    x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
+                    self.NICS_data.append(NICS_point(x, y, z))
+                break
+
+        for i, line in enumerate(lines):
+            if 'Chemical shielding for Bq' not in line:
+                continue
+
+            for j in range(i + 1, min(i + 20, len(lines))):
+                if 'Shielding constant:' in lines[j]:
+                    NICS_iso = float(lines[j].split()[2])
+                    self.NICS_data[Bqind].set_iso(NICS_iso)
+                    break
+
+            for j in range(i + 1, min(i + 60, len(lines))):
+                if 'Total shielding tensor (ppm):' not in lines[j]:
+                    continue
+
+                tensor = []
+                k = j + 1
+                while len(tensor) < 3 and k < len(lines):
+                    parts = lines[k].split()
+                    if (len(parts) >= 4
+                            and parts[0] == 'Bq'
+                            and parts[-4] in ('x', 'y', 'z')):
+                        row = [float(parts[-3]),
+                               float(parts[-2]),
+                               float(parts[-1])]
+                        tensor.append(row)
+                    k += 1
+
+                self.NICS_data[Bqind].set_tensor(tensor)
+                self.NICS_data[Bqind].diag()
+                break
+
+            Bqind += 1
+
+        print("Finished parsing %s" % logfile)
+
+        if lvprt >= 1:
+            print(" *** Printing NICS and eigenvalues ***")
+            for ipoint, point in enumerate(self.NICS_data):
+                print("P%i ->" % ipoint, point)
