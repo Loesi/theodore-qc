@@ -414,58 +414,124 @@ class NICS_parser_dalton(NICS_parser):
     Parse Dalton NICS calculations.
     """
     def read(self, logfile, lvprt=1):
+        print("Reading Dalton information")
         self.NICS_data = []
-        Bqind = 0
+        with open(logfile, 'r') as f:
+            bq_coords = []
+            for line in f:
+                #if 'Cartesian Coordinates (xyz format; angstrom)' in line:
+                    #next(f)
+                    #next(f)
+                    #next(f)
+                    #next(f)
+                    #while True:
+                        #ln = next(f)
+                        #if not ln.strip():
+                            #break
+                        #words = ln.split()
+                        #if words[0] == 'Bq':
+                            #bq_coords.append((float(words[1]),
+                                              #float(words[2]),
+                                              #float(words[3])))
+                    #break
+
+                if 'Cartesian Coordinates (xyz format; angstrom)' in line:
+                    in_coords = False
+
+                    while True:
+                        try:
+                            ln = next(f)
+                        except StopIteration:
+                            break
+
+                        words = ln.split()
+
+                        if not words and not in_coords:
+                            continue
+
+                        if not words and in_coords:
+                            break
+
+                        if len(words) < 4:
+                            continue
+                        try:
+                            x = float(words[1])
+                            y = float(words[2])
+                            z = float(words[3])
+                        except ValueError:
+                            continue
+
+                        in_coords = True
+
+                        if words[0] == 'Bq':
+                            bq_coords.append((x, y, z))
+
+        if not bq_coords:
+            raise RuntimeError(
+                "No Bq coordinates found in the 'Cartesian Coordinates "
+                "(xyz format; angstrom)' section of %s" % logfile
+            )
+        for (x, y, z) in bq_coords:
+            self.NICS_data.append(NICS_point(x, y, z))
 
         with open(logfile, 'r') as f:
-            lines = f.readlines()
-
-        for i, line in enumerate(lines):
-            if 'Charge=0.0' in line and 'Atoms=' in line and 'Basis=' in line:
-                n_bq = 0
-                for part in line.split():
-                    if part.startswith('Atoms='):
-                        n_bq = int(part.split('=')[1])
-                for j in range(n_bq):
-                    parts = lines[i + 1 + j].split()
-                    x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
-                    self.NICS_data.append(NICS_point(x, y, z))
-                break
-
-        for i, line in enumerate(lines):
-            if 'Chemical shielding for Bq' not in line:
-                continue
-
-            for j in range(i + 1, min(i + 20, len(lines))):
-                if 'Shielding constant:' in lines[j]:
-                    NICS_iso = float(lines[j].split()[2])
-                    self.NICS_data[Bqind].set_iso(NICS_iso)
+            Bqind = 0
+            while True:
+                try:
+                    line = next(f)
+                except StopIteration:
+                    print("Finished parsing %s" % logfile)
                     break
 
-            for j in range(i + 1, min(i + 60, len(lines))):
-                if 'Total shielding tensor (ppm):' not in lines[j]:
-                    continue
+                if 'Chemical shielding for Bq' in line:
+                    while True:
+                        line = next(f)
+                        if 'Shielding constant' in line:
+                            break
 
-                tensor = []
-                k = j + 1
-                while len(tensor) < 3 and k < len(lines):
-                    parts = lines[k].split()
-                    if (len(parts) >= 4
-                            and parts[0] == 'Bq'
-                            and parts[-4] in ('x', 'y', 'z')):
-                        row = [float(parts[-3]),
-                               float(parts[-2]),
-                               float(parts[-1])]
-                        tensor.append(row)
-                    k += 1
+                    NICS_iso = float(line.split()[2])
 
-                self.NICS_data[Bqind].set_tensor(tensor)
-                self.NICS_data[Bqind].diag()
-                break
+                    while True:
+                        line = next(f)
+                        if 'Total shielding tensor' in line:
+                            break
 
-            Bqind += 1
+                    tensor = []
 
-        print("Finished parsing %s" % logfile)
+                    while len(tensor) < 3:
+                        line = next(f).strip()
+                        if not line:
+                            continue
+
+                        words = line.split()
+
+                        if not words or words[0] != 'Bq':
+                            continue
+
+                        #print("DEBUG:", words)
+
+                        try:
+                            vals = [float(x) for x in words[-3:]]
+                        except ValueError:
+                            raise RuntimeError(f"Malformed tensor row: {words}")
+
+                        tensor.append(vals)
+
+                        #tensor.append([
+                            #float(words[3]),
+                            #float(words[4]),
+                            #float(words[5])
+                        #])
+
+                    if Bqind >= len(self.NICS_data):
+                        raise RuntimeError(
+                            "More shielding tensors than Bq coordinates found"
+                        )
+
+                    self.NICS_data[Bqind].set_iso(NICS_iso)
+                    self.NICS_data[Bqind].set_tensor(tensor)
+                    self.NICS_data[Bqind].diag()
+                    Bqind += 1
 
         if lvprt >= 1:
             print(" *** Printing NICS and eigenvalues ***")
