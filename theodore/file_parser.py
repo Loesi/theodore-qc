@@ -2166,7 +2166,7 @@ class file_parser_orca_CAS(file_parser_base):
                     continue
 
                 words = l.split()
-                state = {'mult': int(words[2][0]), 'irrep': words[2][1:], 'state_ind': len(state_list), 'exc_en': float(words[3])}
+                state = {'mult': int(words[2].split("-")[1][0]), 'irrep': words[2].split("-")[1][1:], 'state_ind': int(words[2].split("-")[0]), 'exc_en': float(words[3])}
                 state['name'] = '%i(%i)%s'%(state['state_ind'], state['mult'] ,state['irrep'])
                 state_list.append(state)
                 
@@ -2224,7 +2224,7 @@ class file_parser_orca_CAS(file_parser_base):
         bytes_per_value = 8
         densfile = open(filen1, 'rb')
 
-        print(len(state_list))
+        print(f"found {len(state_list)} states")
         i = 0
         for item in parse_instructions:
             if isinstance(item, int):
@@ -2237,9 +2237,10 @@ class file_parser_orca_CAS(file_parser_base):
                 if len(raw) != bytes_to_read:
                     raise EOFError(f"Unexpected end of file while reading matrix of size {rows}x{cols}. Expected {bytes_to_read} bytes, but got {len(raw)} bytes.")
 
-                array = numpy.frombuffer(raw, dtype=numpy.float64).reshape((rows,cols))
-                print(i)
-                state_list[i]['tden'] = array
+                D_AO = numpy.frombuffer(raw, dtype=numpy.float64).reshape((rows,cols))
+                temp   = mos.CdotD(D_AO.T, trnsp=False, inv=True)   # C⁻¹ @ D_AOᵀ      → (nmo × nbas)
+                D_MO   = mos.MdotC(temp, trnsp=True, inv=True)      # C⁻¹ @ D_AOᵀ @ C⁻ᵀ  → (nmo × nmo)
+                state_list[i]['tden'] = D_MO
                 i += 1
 
         # just doing some sanity check that everything was as expected and we now reached the end of the densities file.
